@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<style>
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #08090b;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#error {
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    max-width: calc(100% - 40px);
+    padding: 10px 14px;
+
+    color: #ffb4b4;
+    background: rgba(80, 0, 0, 0.65);
+
+    border: 1px solid rgba(255, 70, 70, 0.45);
+    border-radius: 6px;
+
+    font: 12px/1.4 Arial, sans-serif;
+
+    display: none;
+    z-index: 100;
+}
+</style>
+
+
+<!-- THREE.JS IMPORTS -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    }
+}
+</script>
+
+</head>
+
+
+<body>
+
+<div id="error"></div>
+
+
+<script type="module">
+
+import * as THREE from "three";
+
+import {
+    OrbitControls
+} from "three/addons/controls/OrbitControls.js";
+
+import {
+    FBXLoader
+} from "three/addons/loaders/FBXLoader.js";
+
+
+// =====================================================
+// ERROR HANDLING
+// =====================================================
+
+const errorBox = document.getElementById("error");
+
+function showError(message) {
+
+    console.error(message);
+
+    errorBox.textContent = message;
+
+    errorBox.style.display = "block";
+}
+
+
+// =====================================================
+// 🔧 CAR ADJUSTMENT SETTINGS
+// CHANGE ONLY THESE VALUES
+// =====================================================
+
+
+// Car rotation
+const CAR_ROTATION_X = -180; // pitch
+const CAR_ROTATION_Y = 45;   // turn left/right
+const CAR_ROTATION_Z = 90;   // roll
+
+
+// Car vertical position
+// Higher number = higher car
+const CAR_LIFT = 0.55;
+
+
+// =====================================================
+// 🔍 ZOOM SETTINGS
+// =====================================================
+
+
+// Starting zoom.
+//
+// 0.50 = very close
+// 0.65 = close
+// 0.75 = current
+// 1.00 = normal
+// 1.25 = farther away
+//
+// LOWER = BIGGER CAR
+// HIGHER = SMALLER CAR
+
+const CAR_START_ZOOM = 0.75;
+
+
+// Minimum zoom allowed by user
+//
+// LOWER = user can zoom closer
+
+const CAR_MIN_ZOOM = 0.45;
+
+
+// Maximum zoom allowed by user
+//
+// HIGHER = user can zoom farther away
+
+const CAR_MAX_ZOOM = 3.5;
+
+
+// =====================================================
+// SCENE
+// =====================================================
+
+const scene = new THREE.Scene();
+
+
+// Pure dark background
+scene.background = new THREE.Color(0x08090b);
+
+
+// =====================================================
+// CAMERA
+// =====================================================
+
+const camera = new THREE.PerspectiveCamera(
+    35,
+    1,
+    0.01,
+    1000
+);
+
+
+// =====================================================
+// RENDERER
+// =====================================================
+
+const renderer = new THREE.WebGLRenderer({
+
+    antialias: true,
+
+    powerPreference: "high-performance"
+
+});
+
+
+renderer.setPixelRatio(
+    Math.min(
+        window.devicePixelRatio,
+        2
+    )
+);
+
+
+renderer.outputColorSpace =
+    THREE.SRGBColorSpace;
+
+
+renderer.toneMapping =
+    THREE.ACESFilmicToneMapping;
+
+
+renderer.toneMappingExposure = 1.35;
+
+
+// Shadows
+renderer.shadowMap.enabled = true;
+
+renderer.shadowMap.type =
+    THREE.PCFSoftShadowMap;
+
+
+document.body.appendChild(
+    renderer.domElement
+);
+
+
+// =====================================================
+// LIGHTING
+// =====================================================
+
+
+// Main soft light
+scene.add(
+    new THREE.HemisphereLight(
+        0xbfd4ff,
+        0x08090b,
+        2
+    )
+);
+
+
+// Main white light
+const keyLight =
+    new THREE.DirectionalLight(
+        0xffffff,
+        4.5
+    );
+
+keyLight.position.set(
+    6,
+    10,
+    8
+);
+
+keyLight.castShadow = true;
+
+scene.add(keyLight);
+
+
+// Blue rim light
+const rimLight =
+    new THREE.DirectionalLight(
+        0x507cff,
+        3
+    );
+
+rimLight.position.set(
+    -8,
+    5,
+    -10
+);
+
+scene.add(rimLight);
+
+
+// Red rim light
+const redLight =
+    new THREE.DirectionalLight(
+        0xff3030,
+        1.2
+    );
+
+redLight.position.set(
+    8,
+    3,
+    -8
+);
+
+scene.add(redLight);
+
+
+// =====================================================
+// IMPORTANT:
+// NO FLOOR
+// =====================================================
+//
+// The old floor has been completely removed.
+// The car now renders against the dark background.
+// =====================================================
+
+
+// =====================================================
+// ORBIT CONTROLS
+// =====================================================
+
+const controls =
+    new OrbitControls(
+        camera,
+        renderer.domElement
+    );
+
+
+// Smooth movement
+controls.enableDamping = true;
+
+controls.dampingFactor = 0.06;
+
+
+// Don't allow panning
+controls.enablePan = false;
+
+
+// Enable zoom
+controls.enableZoom = true;
+
+controls.zoomSpeed = 0.8;
+
+
+// Auto rotation
+controls.autoRotate = true;
+
+controls.autoRotateSpeed = -0.65;
+
+
+// =====================================================
+// GLOBAL CAR SIZE
+// =====================================================
+
+let carSize = 5;
+
+
+// =====================================================
+// RESIZE
+// =====================================================
+
+function resize() {
+
+    const width =
+        Math.max(
+            document.documentElement.clientWidth,
+            1
+        );
+
+    const height =
+        Math.max(
+            document.documentElement.clientHeight,
+            1
+        );
+
+
+    camera.aspect =
+        width / height;
+
+
+    camera.updateProjectionMatrix();
+
+
+    renderer.setSize(
+        width,
+        height,
+        false
+    );
+}
+
+
+window.addEventListener(
+    "resize",
+    resize
+);
+
+
+// =====================================================
+// PREPARE CAR MATERIALS
+// =====================================================
+
+function prepare(model) {
+
+    model.traverse(
+        (object) => {
+
+            if (!object.isMesh) {
+                return;
+            }
+
+
+            object.castShadow = true;
+
+            object.receiveShadow = true;
+
+
+            const materials =
+                Array.isArray(object.material)
+                    ? object.material
+                    : [object.material];
+
+
+            materials.forEach(
+                (material) => {
+
+                    if (!material) {
+                        return;
+                    }
+
+
+                    if (
+                        "roughness"
+                        in material
+                    ) {
+
+                        material.roughness =
+                            0.32;
+                    }
+
+
+                    if (
+                        "metalness"
+                        in material
+                    ) {
+
+                        material.metalness =
+                            0.35;
+                    }
+
+
+                    material.needsUpdate =
+                        true;
+
+                }
+            );
+
+        }
+    );
+}
+
+
+// =====================================================
+// FRAME / POSITION CAR
+// =====================================================
+
+function frame(model) {
+
+
+    // =================================================
+    // GET ORIGINAL SIZE
+    // =================================================
+
+    let box =
+        new THREE.Box3()
+            .setFromObject(model);
+
+
+    let size =
+        box.getSize(
+            new THREE.Vector3()
+        );
+
+
+    let center =
+        box.getCenter(
+            new THREE.Vector3()
+        );
+
+
+    // =================================================
+    // CENTER MODEL
+    // =================================================
+
+    model.position.sub(
+        center
+    );
+
+
+    // =================================================
+    // NORMALIZE SIZE
+    // =================================================
+
+    const largest =
+        Math.max(
+            size.x,
+            size.y,
+            size.z
+        );
+
+
+    if (
+        !Number.isFinite(largest) ||
+        largest <= 0
+    ) {
+
+        throw new Error(
+            "FBX has no usable geometry."
+        );
+    }
+
+
+    model.scale.setScalar(
+        5.5 / largest
+    );
+
+
+    // =================================================
+    // APPLY YOUR CAR ROTATION
+    // =================================================
+
+    model.rotation.set(
+
+        THREE.MathUtils.degToRad(
+            CAR_ROTATION_X
+        ),
+
+        THREE.MathUtils.degToRad(
+            CAR_ROTATION_Y
+        ),
+
+        THREE.MathUtils.degToRad(
+            CAR_ROTATION_Z
+        )
+
+    );
+
+
+    // =================================================
+    // RECALCULATE BOUNDING BOX
+    // AFTER ROTATION
+    // =================================================
+
+    box =
+        new THREE.Box3()
+            .setFromObject(model);
+
+
+    // =================================================
+    // PUT CAR ABOVE BASE POSITION
+    // =================================================
+
+    model.position.y -=
+        box.min.y;
+
+
+    // =================================================
+    // LIFT CAR
+    // =================================================
+
+    model.position.y +=
+        CAR_LIFT;
+
+
+    // =================================================
+    // RECENTER X / Z
+    // =================================================
+
+    box =
+        new THREE.Box3()
+            .setFromObject(model);
+
+
+    center =
+        box.getCenter(
+            new THREE.Vector3()
+        );
+
+
+    model.position.x -=
+        center.x;
+
+
+    model.position.z -=
+        center.z;
+
+
+    // =================================================
+    // FINAL SIZE
+    // =================================================
+
+    box =
+        new THREE.Box3()
+            .setFromObject(model);
+
+
+    size =
+        box.getSize(
+            new THREE.Vector3()
+        );
+
+
+    carSize =
+        Math.max(
+            size.x,
+            size.y,
+            size.z
+        );
+
+
+    // =================================================
+    // BASE CAMERA DISTANCE
+    // =================================================
+
+    const baseDistance =
+
+        (carSize * 0.5) /
+
+        Math.tan(
+
+            THREE.MathUtils.degToRad(
+                camera.fov * 0.5
+            )
+
+        );
+
+
+    // =================================================
+    // STARTING CAMERA DISTANCE
+    // =================================================
+
+    const startDistance =
+
+        baseDistance *
+        1.35 *
+        CAR_START_ZOOM;
+
+
+    // =================================================
+    // CAMERA DIRECTION
+    // =================================================
+
+    const cameraDirection =
+        new THREE.Vector3(
+            1.35,
+            0.48,
+            1.35
+        ).normalize();
+
+
+    // =================================================
+    // ACTUAL STARTING CAMERA POSITION
+    // =================================================
+
+    camera.position.copy(
+
+        cameraDirection
+            .multiplyScalar(
+                startDistance
+            )
+
+    );
+
+
+    // =================================================
+    // CAMERA TARGET
+    // =================================================
+
+    controls.target.set(
+
+        0,
+
+        carSize * 0.30 +
+        CAR_LIFT,
+
+        0
+
+    );
+
+
+    // =================================================
+    // CAMERA CLIPPING
+    // =================================================
+
+    camera.near =
+        Math.max(
+            carSize / 1000,
+            0.01
+        );
+
+
+    camera.far =
+        carSize * 100;
+
+
+    camera.updateProjectionMatrix();
+
+
+    // =================================================
+    // USER ZOOM LIMITS
+    // =================================================
+
+    controls.minDistance =
+
+        baseDistance *
+        CAR_MIN_ZOOM;
+
+
+    controls.maxDistance =
+
+        baseDistance *
+        CAR_MAX_ZOOM;
+
+
+    // =================================================
+    // APPLY INITIAL CAMERA STATE
+    // =================================================
+
+    controls.update();
+
+}
+
+
+// =====================================================
+// LOAD FBX
+// =====================================================
+
+const loader =
+    new FBXLoader();
+
+
+loader.load(
+
+    "./car.fbx",
+
+
+    // =================================================
+    // SUCCESS
+    // =================================================
+
+    (model) => {
+
+        try {
+
+            prepare(model);
+
+            scene.add(model);
+
+            frame(model);
+
+            resize();
+
+        }
+
+        catch (error) {
+
+            showError(
+                "The FBX loaded, but could not be positioned: "
+                + error.message
+            );
+
+        }
+
+    },
+
+
+    // =================================================
+    // LOADING PROGRESS
+    // =================================================
+
+    (progress) => {
+
+        if (progress.total) {
+
+            const percent =
+                Math.round(
+
+                    (
+                        progress.loaded /
+                        progress.total
+                    ) * 100
+
+                );
+
+
+            console.log(
+                "Loading car:",
+                percent + "%"
+            );
+
+        }
+
+    },
+
+
+    // =================================================
+    // ERROR
+    // =================================================
+
+    (error) => {
+
+        showError(
+
+            "Could not load car.fbx. " +
+
+            "Make sure car.fbx is beside " +
+            "car-viewer.html and the site " +
+            "is running through a web server."
+
+        );
+
+
+        console.error(error);
+
+    }
+
+);
+
+
+// =====================================================
+// USER STARTS ROTATING
+// =====================================================
+
+controls.addEventListener(
+    "start",
+    () => {
+
+        controls.autoRotate =
+            false;
+
+    }
+);
+
+
+// =====================================================
+// USER STOPS ROTATING
+// =====================================================
+
+controls.addEventListener(
+    "end",
+    () => {
+
+        controls.autoRotate =
+            true;
+
+    }
+);
+
+
+// =====================================================
+// START
+// =====================================================
+
+resize();
+
+
+function animate() {
+
+    requestAnimationFrame(
+        animate
+    );
+
+
+    controls.update();
+
+
+    renderer.render(
+        scene,
+        camera
+    );
+
+}
+
+
+animate();
+
+</script>
+
+</body>
+</html>
